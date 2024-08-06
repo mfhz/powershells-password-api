@@ -1,4 +1,21 @@
-# Ruta del archivo CSV
+# Ruta de la carpeta donde se realizará la búsqueda
+$carpeta = "C:\"
+
+# Lista de rutas a excluir
+$exclusiones = @(
+    "C:\PerfLogs",
+    "C:\Program Files (x86)",
+    "C:\Program Files",
+    "C:\Windows",
+    "C:\xampp",
+    "C:\Oracle",
+    "C:\PowerBuilder",
+    "C:\ProgramData",
+    "C:\PowerBuilder",
+    "C:\Users\*\.vscode",
+    "C:\Users\*\ .vscode"
+)
+
 $csvPath = "C:\ResultadosContrasenas.csv"
 $token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJodHRwOi8vbG9jYWxob3N0OjgwMDAvYXBpL2xvZ2luIiwiaWF0IjoxNzIyOTYwMjIyLCJleHAiOjE3MjI5NjM4MjIsIm5iZiI6MTcyMjk2MDIyMiwianRpIjoiWjNNenBqdmRDSG5ocE85UiIsInN1YiI6IjEiLCJwcnYiOiIyM2JkNWM4OTQ5ZjYwMGFkYjM5ZTcwMWM0MDA4NzJkYjdhNTk3NmY3In0.XU0lh3oxqvKxdoRLkvuooX5QT-h7Ek_smYp_XBfuB1A"
 
@@ -13,6 +30,78 @@ $endpointHostname = "http://localhost:8000/api/hostname"
 $endpointFiles = "http://localhost:8000/api/files"
 $endpointKeyFiles = "http://localhost:8000/api/keyFiles"
 
+# Lista para almacenar las rutas y palabras encontradas de archivos con posibles contraseñas
+$resultados = New-Object System.Collections.Generic.List[PSCustomObject]
+
+# Palabras a buscar
+$palabrasClave = @("contraseña:", "pwd:", "password:", "clave:", "contrasena:", "credential:", "pass:", "key:", "credential:","contraseña=", "pwd=", "password=", "clave=", "contrasena=", "credential=", "pass=", "key=", "credential=", "contraseña", "pwd", "password", "clave", "contrasena", "credential", "pass", "key", "credential")
+
+# Función para verificar si una ruta está en la lista de exclusiones
+function EstaEnExclusiones($ruta, $exclusiones) {
+    foreach ($exclusion in $exclusiones) {
+        if ($ruta -like "$exclusion*") {
+            return $true
+        }
+    }
+    return $false
+}
+
+# Función recursiva para obtener archivos con manejo de excepciones
+function ObtenerArchivos($ruta) {
+    $archivos = @()
+    try {
+        $items = Get-ChildItem -Path $ruta -ErrorAction Stop
+        foreach ($item in $items) {
+            if ($item.PSIsContainer) {
+                if (-not (EstaEnExclusiones $item.FullName $exclusiones)) {
+                    $archivos += ObtenerArchivos $item.FullName
+                }
+            } else {
+                if ($item.Extension -in @('.txt', '.csv', '.dll', '.xml', '.html', '.ps1', '.bat', '.ini') -and -not (EstaEnExclusiones $item.FullName $exclusiones)) {
+                    $archivos += $item
+                }
+            }
+        }
+    } catch {
+        Write-Output "Error al acceder a la ruta: $ruta - $_"
+    }
+    return $archivos
+}
+
+# Obtener todos los archivos aplicando exclusiones
+$archivos = ObtenerArchivos $carpeta
+
+# Función para buscar palabras clave en los archivos
+function BuscarPalabrasClave($archivo) {
+    try {
+        $contenido = Get-Content -Path $archivo.FullName -ErrorAction Stop
+        for ($i = 0; $i -lt $contenido.Length; $i++) {
+            $linea = $contenido[$i]
+            foreach ($palabra in $palabrasClave) {
+                if ($linea -match $palabra) {
+                    $resultados.Add([PSCustomObject]@{
+                        Ruta = $archivo.FullName
+                        PalabraClave = $palabra
+                        Linea = $i + 1
+                    })
+                }
+            }
+        }
+    } catch {
+        Write-Output "No se pudo leer el archivo $($archivo.FullName): $_"
+    }
+}
+
+# Buscar palabras clave en cada archivo
+foreach ($archivo in $archivos) {
+    BuscarPalabrasClave $archivo
+}
+
+# Exporta los resultados a un archivo CSV
+$resultados | Export-Csv -Path "C:\ResultadosContrasenas.csv" -NoTypeInformation
+
+
+# Sección de código para subir los datos al servidor
 $responseHostName = Invoke-RestMethod -Uri $endpointHostname -Method Get -Headers @{ Authorization = "Bearer $token" }
 
 
